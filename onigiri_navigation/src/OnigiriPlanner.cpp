@@ -761,7 +761,7 @@ private:
 			ROS_INFO("敵発見！！ [%f, %f]", area, m_diffPos);
 			m_enemy_det_time = ros::Time::now().toSec();
 			// 近くなって追いかけれる距離になれば KNOWNENEMYに移動
-			if(m_state == RULO_PLAN_STATE_MOVE_KNOWNGOAL & area > 40000 ){
+			if(m_state == RULO_PLAN_STATE_MOVE_KNOWNGOAL & area > 180000 ){
 				m_action = RULO_PLAN_STATE_MOVE_NEARENEMY;
 				ioState = 2;
 			}
