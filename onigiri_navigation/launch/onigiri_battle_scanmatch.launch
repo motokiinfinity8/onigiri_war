@@ -1,0 +1,75 @@
+<?xml version="1.0"?>
+
+<launch>
+
+  <!-- robot model -->
+  <!--<arg name="urdf_file" default="$(find xacro)/xacro.py '$(find whill_next_description)/urdf/robot.urdf.xacro'" />
+  <param name="robot_description" command="$(arg urdf_file)" /> -->
+  
+  <!-- tf -->
+  <!--<node pkg="tf" type="static_transform_publisher" name="base_frame_2_laser_link" args="0.0 0 0 3.14 0 0 red_bot/base_link red_bot/laser 100" /> -->
+
+  <!-- Map server -->
+  <arg name="map_file" default="$(find onigiri_navigation)/maps/map.yaml"/>
+  <node name="map_server" pkg="map_server" type="map_server" args="$(arg map_file)">
+  </node>
+
+  <!-- AMCL -->
+  <include file="$(find onigiri_navigation)/launch/amcl.launch.xml"/>
+
+  <node pkg="rviz" type="rviz" name="rviz" args="-d $(find onigiri_navigation)/launch/rviz_cfg.rviz"/>
+
+  <!-- move_base --> 
+  <arg name="cmd_vel_topic" default="red_bot/cmd_vel"/>
+  <!--<arg name="odom_topic" default="red_bot/odom" /> -->
+  <arg name="odom_topic" default="red_bot/odom_scanmatch" />
+  <arg name="image_raw_topic" default="red_bot/camera/image_raw" />
+  <arg name="target_id_topic" default="red_bot/target_id" />
+
+  <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
+    <param name="base_local_planner" value="dwa_local_planner/DWAPlannerROS" />
+    <param name="planner_patience" type="int" value="1"/>
+    <param name="max_planning_retries" type="int" value="1"/>
+    <rosparam file="$(find onigiri_navigation)/param/costmap_common_params.yaml" command="load" ns="global_costmap" />
+    <rosparam file="$(find onigiri_navigation)/param/costmap_common_params.yaml" command="load" ns="local_costmap" />
+    <rosparam file="$(find onigiri_navigation)/param/local_costmap_params.yaml" command="load" />
+    <rosparam file="$(find onigiri_navigation)/param/global_costmap_params.yaml" command="load" />
+   <!-- <rosparam file="$(find onigiri_navigation)/param/base_local_planner_params.yaml" command="load" /> -->
+    <rosparam file="$(find onigiri_navigation)/param/dwa_local_planner_params.yaml" command="load" />
+    <rosparam file="$(find onigiri_navigation)/param/move_base_params.yaml" command="load" />
+    <remap from="cmd_vel" to="red_bot/cmd_vel2"/>
+    <remap from="odom" to="$(arg odom_topic)"/>
+  </node>
+ 
+   <!-- Start joycon -->
+   <node pkg="joy" name="joycon" type="joy_node"/>
+
+
+    <!-- Launch all Rulo side nodes under the rulo7_planner -->
+    <node pkg="onigiri_navigation" type="OnigiriPlanner" name="OnigiriPlanner" output="screen">
+      <remap from="cmd_vel" to="$(arg cmd_vel_topic)"/>
+      <remap from="odom" to="$(arg odom_topic)"/>
+      <remap from="image_raw" to="$(arg image_raw_topic)"/>
+      <remap from="target_id" to="$(arg target_id_topic)"/>
+    </node>
+ 
+  <!-- LRFのスキャンマッチングでオドメトリ値を出すための処理 -->
+  <node pkg="tf2_ros" type="static_transform_publisher" args="0 0 0 3.1415 0 0 red_bot/base_link_scanmatch /red_bot/laser2" name="tf_scanmatch"/>
+  <node pkg="onigiri_navigation" type="copy_scan.py" name="copy_scan"/>
+
+   <node pkg="laser_scan_matcher" type="laser_scan_matcher_node" name="laser_scan_matcher_node" output="screen">
+    <remap from="scan" to="/red_bot/scan2"/>
+    <!-- <remap from="scan" to="/red_bot/scan"/> -->
+    <param name="use_imu" value="false"/>
+    <param name="use_odom" value="true"/>
+    <param name="fixed_frame" value="red_bot/odom_scanmatch"/>
+    <param name="base_frame" value="red_bot/base_link_scanmatch"/>
+    <!-- <param name="base_frame" value="red_bot/odom"/> -->
+    <param name="max_iterations" value="10"/>
+   </node>
+
+
+</launch>
+
+
+

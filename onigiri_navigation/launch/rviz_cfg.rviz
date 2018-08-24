@@ -95,7 +95,7 @@ Visualization Manager:
       Size (Pixels): 3
       Size (m): 0.025
       Style: Flat Squares
-      Topic: /red_bot/scan
+      Topic: /red_bot/scan2
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true

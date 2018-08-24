@@ -1,8 +1,8 @@
 local_costmap:
-   global_frame: red_bot/odom_scanmatch
-#  global_frame: red_bot/odom
-   robot_base_frame: red_bot/base_link_scanmatch
-#   robot_base_frame: red_bot/base_link
+   global_frame: blue_bot/odom_scanmatch
+#  global_frame: blue_bot/odom
+   robot_base_frame: blue_bot/base_link_scanmatch
+#   robot_base_frame: blue_bot/base_link
 #   global_frame: odom
 #   robot_base_frame: base_link
    update_frequency: 5.0

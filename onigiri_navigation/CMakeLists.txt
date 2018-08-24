@@ -14,6 +14,8 @@ find_package(catkin REQUIRED COMPONENTS
   actionlib_msgs
   sensor_msgs
   tf
+  cv_bridge
+  image_transport
 )
 
 ## System dependencies are found with CMake's conventions
@@ -150,6 +152,7 @@ add_executable(OnigiriPlanner src/OnigiriPlanner.cpp)
 
 ## Specify libraries to link a library or executable target against
 target_link_libraries(OnigiriPlanner ${catkin_LIBRARIES})
+target_link_libraries(OnigiriPlanner ${catkin_LIBRARIES} /opt/ros/kinetic/lib/x86_64-linux-gnu/libopencv_highgui3.so)
 # target_link_libraries(${PROJECT_NAME}_node
 #   ${catkin_LIBRARIES}
 # )

@@ -17,10 +17,20 @@
 #include <move_base_msgs/MoveBaseAction.h>
 #include <move_base_msgs/MoveBaseActionGoal.h>
 
+
+#include <cv_bridge/cv_bridge.h>
+#include <image_transport/image_transport.h>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <geometry_msgs/PointStamped.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/Twist.h>
+
+#include <dynamic_reconfigure/DoubleParameter.h>
+#include <dynamic_reconfigure/Reconfigure.h>
+#include <dynamic_reconfigure/Config.h>
 
 #include <sensor_msgs/LaserScan.h>
 #include <sensor_msgs/Joy.h>
@@ -33,29 +43,33 @@ struct Point{
     float ori_z;
     float front_time;
     float wait_time;
+    bool  back_run;
 };
 
 
 /** ex) Onigiri World **/
-Point start_ptn = { 0.05, 0.00, 0.00, 0};
-Point docking_ptn = { 0.00, 0.00, 0.00, 0};
+Point start_ptn = { 0.100, -0.00, -0.02, 0, 0, false};
+Point docking_ptn = { 0.00, 0.00, 0.00, 0, 0, false};
 Point goal_ptn[] = {
-{0.850, 0.438,  0.250, 1.2, 2.0},	// 手前左の見える位置
-//{0.898,-0.481, -0.222, 1.0, 2.0},	// 手前右の見える位置
-{1.418, 0.032, -0.005, 2.0, 2.0},	// 手前真ん中の位置
-{2.297, 0.777, -0.011, 1.5, 2.0},	// 左側の正面
-{2.297, 0.777, -0.324, 2.5,15.0},	// 左側から敵を監視
-{2.297, 0.777, -0.702, 1.0, 2.0},	// 左側の中央向き
-//{2.297, 0.777, -0.999, 1.5, 2.0},	// 左側の後ろ
-{1.418, 0.032, -0.324, 0.0, 0.0},	// 手前真ん中の位置
-{2.374, -0.889,  0.049, 1.5, 2.0},	// 右側の正面
-{2.374, -0.889,  0.40,  2.5, 15.0},
-{2.374, -0.889,  0.712, 1.0, 2.0},	// 右側の中央向き
-{2.374, -0.889, -0.999, 1.5, 2.0},	// 右側の後ろ
-{3.030, -0.150,  0.02,  0.0, 0.0},
-{3.788, -0.585,  0.74,  0.0, 3.0},
-{4.294, -0.021, -0.999, 0.0, 60.0},
-};	// 右側真ん中から敵を監視
+//{0.850, 0.438,  0.250, 0.5, 2.0},	// 手前左の見える位置
+//{0.898,-0.481, -0.222, 0.5, 2.0},	// 手前右の見える位置
+//{1.418, 0.032, -0.005, 0.5, 2.0},	// 手前真ん中の位置
+{2.297, 0.777, -0.011, 0.5, 2.0, false},	// 0:左側の正面
+//{2.297, 0.777, -0.324, 2.5,15.0},	// 左側から敵を監視
+{2.297, 0.777, -0.702, 0.5, 2.0, false},	// 1:左側の中央向き
+{2.297, 0.777, -0.999, 0.5, 2.0, false},	// 2:左側の後ろ (敵がいたらスキップ）
+{2.297, 0.777, -0.324, 0.0, 0.0, false},	// 3:左側の正面より右向き
+//{2.297, 0.777,  0.324, 0.0, 0.0, false},	// 左側の正面より左向き
+//{1.518, 0.032, -0.324, 0.0, 0.0, true},	// 手前真ん中の位置
+{3.250,  0.012,  0.000, 0.0, 0.0, false},	// 4:敵陣センター
+{3.250,  0.012, -0.999, 1.0, 2.0, false},	// 5:敵陣センター(敵がいなかった場合)
+{3.250,  0.012,  0.40,  0.0, 0.0, false},	// 6:敵陣センター(敵がいた場合) 
+{2.374, -0.889,  0.982, 0.5, 2.0, false},	// 7:右側の後ろ
+{2.374, -0.889,  0.712, 0.5, 2.0, false},	// 8:右側の中央向き
+{2.374, -0.889,  0.049, 0.5, 2.0, false},	// 9:右側の正面　(敵がいたらスキップ)
+{2.374, -0.889,  0.712, 0.0, 0.0, false},	// 10:右側の中央向き
+{2.28, -2.121, 0.694, 0.0, 60.0, true},	// 11:大殿ごもる
+};
 
 
 
@@ -122,6 +136,17 @@ private:
 	int global_goal_id;
 	int ioState;	//0:なし、1:遷移初回時(in)、2:次状態への遷移前(out)
 
+	//camera detect
+	image_transport::ImageTransport it_;
+	image_transport::Subscriber image_sub;
+	cv::Mat hsv;
+	cv::Mat mask;
+	cv::Mat image;
+	double m_diffPos;
+	double m_enemy_det_time;
+	bool m_back_run;
+
+
   	// PS4 Controller node (for debug)   
 	ros::Subscriber joy_sub,targetid_sub;
 	ros::Publisher twist_pub;
@@ -150,7 +175,7 @@ private:
 
 		//wait for the action server to come up
 		ROS_INFO("Waiting move_base action server");
-		m_moveBaseClient.waitForServer(ros::Duration(5.0));
+		m_moveBaseClient.waitForServer(ros::Duration(1.0));
 
 		//cancel a previous goal information
 		m_moveBaseClient.cancelAllGoals();
@@ -198,15 +223,97 @@ private:
 				}
 				// STANDBY遷移初回時、時刻情報を習得
 				start_time = ros::Time::now().toSec();
+				m_enemy_det_time = ros::Time::now().toSec();
 			}
 
 			// 常時処理
 			//5秒立った or PSボタン押しで、MOVE_KNOWNGOALに遷移する（仮仕様)
 			diff_time = ros::Time::now().toSec() - start_time;
-			if(diff_time > 1){
+			if(diff_time< 1.0){
+				cmd_vel_hack.linear.x = 0;
+				cmd_vel_hack.angular.z = 0.5;
+				twist_pub.publish(cmd_vel_hack);
+				ROS_INFO("sub-s : STANDBY1, %f",diff_time);
+			}else if(diff_time <3.0){
+				cmd_vel_hack.linear.x = 0.5;
+				cmd_vel_hack.angular.z = 0.0;
+				twist_pub.publish(cmd_vel_hack);
+				ROS_INFO("sub-s : STANDBY2, %f",diff_time);
+			}else if(diff_time <3.5){
+				cmd_vel_hack.linear.x = 0.0;
+				cmd_vel_hack.angular.z = 0.0;
+				twist_pub.publish(cmd_vel_hack);
+				ROS_INFO("sub-s : STANDBY3, %f",diff_time);
+			}else if(diff_time <5.35){
+				cmd_vel_hack.linear.x = 0.0;
+				cmd_vel_hack.angular.z = -1.0;
+				twist_pub.publish(cmd_vel_hack);
+				ROS_INFO("sub-s : STANDBY4, %f",diff_time);
+			}else if(diff_time <7.8){
+				cmd_vel_hack.linear.x = 1.0;
+				cmd_vel_hack.angular.z = 0.0;
+				twist_pub.publish(cmd_vel_hack);
+				ROS_INFO("sub-s : STANDBY5, %f",diff_time);
+			}else if(diff_time <9.0){
+				cmd_vel_hack.linear.x = 0.0;
+				cmd_vel_hack.angular.z = 1.0;
+				twist_pub.publish(cmd_vel_hack);
+				ROS_INFO("sub-s : STANDBY6, %f",diff_time);
+			}else if(diff_time <10.0){
+				cmd_vel_hack.linear.x = 0.0;
+				cmd_vel_hack.angular.z = 0.0;
+				twist_pub.publish(cmd_vel_hack);
+				ROS_INFO("sub-s : STANDBY7, %f",diff_time);
+			}else if(diff_time <11.5){
+				cmd_vel_hack.linear.x = 0.0;
+				cmd_vel_hack.angular.z = 1.0;
+				twist_pub.publish(cmd_vel_hack);
+				ROS_INFO("sub-s : STANDBY8, %f",diff_time);
+			}else if(diff_time <12.6){
+				cmd_vel_hack.linear.x = 1.0;
+				cmd_vel_hack.angular.z = 0.0;
+				twist_pub.publish(cmd_vel_hack);
+				ROS_INFO("sub-s : STANDBY9, %f",diff_time);
+			}else if(diff_time <13.75){
+				cmd_vel_hack.linear.x = 0.0;
+				cmd_vel_hack.angular.z = -1.0;
+				twist_pub.publish(cmd_vel_hack);
+				ROS_INFO("sub-s : STANDBY10, %f",diff_time);
+			}else if(diff_time <14.75){
+				cmd_vel_hack.linear.x = 1.0;
+				cmd_vel_hack.angular.z = 0.0;
+				twist_pub.publish(cmd_vel_hack);
+				ROS_INFO("sub-s : STANDBY11, %f",diff_time);
+			}else if(diff_time <16.1){
+				cmd_vel_hack.linear.x = -1.0;
+				cmd_vel_hack.angular.z = 0.0;
+				twist_pub.publish(cmd_vel_hack);
+				ROS_INFO("sub-s : STANDBY12, %f",diff_time);
+			}else{
+				cmd_vel_hack.linear.x = 0.0;
+				cmd_vel_hack.angular.z = 0.0;
+				twist_pub.publish(cmd_vel_hack);
+
+				//geometry_msgs::PoseWithCovarianceStamped initial_pose;
+				//initial_pose.header.frame_id = "map";
+				//initial_pose.header.stamp = ros::Time::now();
+				//initial_pose.pose.pose.position.x    = start_ptn.pos_x;
+				//initial_pose.pose.pose.position.y    = start_ptn.pos_y;
+				//initial_pose.pose.pose.orientation.z = start_ptn.ori_z;
+				//initial_pose.pose.pose.orientation.w = sqrt(1-pow(start_ptn.ori_z,2));
+				//initial_pose.pose.covariance[0] = 0.25;
+				//initial_pose.pose.covariance[7] = 0.25;
+				//initial_pose.pose.covariance[35] = 0.06853891945200942;
+
+				//initialpose_pub.publish(initial_pose);
+
 				m_action = RULO_PLAN_STATE_MOVE_KNOWNGOAL;
 				ioState = 2;
-		 	}
+			}    
+
+
+			//完了後にmovebaseモードに移行
+			//initialpose_pub.publish(initial_pose);
 
 			// 遷移前処理
 			if(ioState==2){
@@ -225,6 +332,12 @@ private:
 			if(ioState==1){
 				ROS_INFO("state : MOVE_KNOWNGOAL,  goal target[%d]",  m_goal_target);
 
+				// dynamic reconfigure設定
+				dynamic_reconfigure::ReconfigureRequest dwa_srv_req;
+				dynamic_reconfigure::ReconfigureResponse  dwa_srv_resp;
+				dynamic_reconfigure::DoubleParameter  dwa_double_param;
+				dynamic_reconfigure::Config dwa_conf;
+
 				// AROUND動作時、既存Goalリストを送信
 				if(m_goal_target == RULO_PLAN_KNOWNGOAL_AROUND){
 
@@ -235,9 +348,26 @@ private:
 					move_goal.target_pose.pose.orientation.z = goal_ptn[global_goal_id].ori_z;
 					move_goal.target_pose.pose.orientation.w = sqrt(1-pow(goal_ptn[global_goal_id].ori_z,2));
 					ROS_INFO("Sending Goal: No.%d [%0.3f,%0.3f,%0.3f]", global_goal_id+1, goal_ptn[global_goal_id].pos_x, goal_ptn[global_goal_id].pos_y, goal_ptn[global_goal_id].ori_z);
-				}
 
-				// Docking検出モードの場合、既存Docking位置座標を送信
+					//バック走行の可否を判断
+					m_back_run =goal_ptn[global_goal_id].back_run;
+					if(global_goal_id == 7 && (ros::Time::now().toSec() - m_enemy_det_time) < 5){
+						m_back_run = true;
+					} 
+
+                	if(m_back_run == true){
+						dwa_double_param.value = 0.1;
+					}else{
+						dwa_double_param.value = 0.5;
+					}
+					dwa_double_param.name = "max_vel_x";
+					dwa_conf.doubles.push_back(dwa_double_param);
+
+					dwa_srv_req.config = dwa_conf;
+					ros::service::call("/move_base/DWAPlannerROS/set_parameters", dwa_srv_req, dwa_srv_resp);
+					ROS_INFO("max_vel_x : %f", dwa_double_param.value);
+				}
+				// Docking検出モードの場合、既存Docking位置座標を送信(未使用）
 				else if(m_goal_target == RULO_PLAN_KNOWNGOAL_DOCKING){
 
 					move_goal.target_pose.header.frame_id = "map";
@@ -258,7 +388,6 @@ private:
 			if(ioState==2){
 				//別状態に遷移する場合のみ cancelGoal処理
 				m_moveBaseClient.cancelGoal();
-				// cancelGoalの結果待ちする?
 			}
 			break;
 
@@ -271,13 +400,39 @@ private:
 			// 初回遷移時
 			if(ioState==1){
 				ROS_INFO("state : MOVE_NEARENEMY");
+				start_time = ros::Time::now().toSec();
 			}
 
 			// 常時処理
+			diff_time = ros::Time::now().toSec() - start_time;
+			if(diff_time < 2.0){
+				cmd_vel_hack.linear.x = 0.0;
+				cmd_vel_hack.angular.z = 0.005* m_diffPos;
+				twist_pub.publish(cmd_vel_hack);
+				ROS_INFO("Near Ememy Mode[1], %f, %f",cmd_vel_hack.linear.x, cmd_vel_hack.angular.z);
+			}else if(diff_time <4.0){
+				cmd_vel_hack.linear.x = 0.2;
+				cmd_vel_hack.angular.z = 0.005* m_diffPos;
+				twist_pub.publish(cmd_vel_hack);
+				ROS_INFO("Near Ememy Mode[2], %f, %f",cmd_vel_hack.linear.x, cmd_vel_hack.angular.z);
+			}else if(diff_time >=4.0){
+				cmd_vel_hack.linear.x = 0.3;
+				cmd_vel_hack.angular.z = 0.005* m_diffPos;
+				twist_pub.publish(cmd_vel_hack);
+				ROS_INFO("Near Ememy Mode[3], %f, %f",cmd_vel_hack.linear.x, cmd_vel_hack.angular.z);
+			}
 
 			// 遷移前処理
 			if(ioState==2){
+				cmd_vel_hack.linear.x = -0.3;
+				cmd_vel_hack.angular.z = 0.0;
+				twist_pub.publish(cmd_vel_hack);
+				ros::Duration(1).sleep();
 
+				cmd_vel_hack.linear.x = 0.0;
+				cmd_vel_hack.angular.z = 0.0;
+				twist_pub.publish(cmd_vel_hack);
+				ros::Duration(3).sleep();
 			}
 			break;
 
@@ -305,7 +460,7 @@ private:
 			// 常時処理
 			// 前進処理時
 			if(m_near_tgt_state == 0){
-				cmd_vel_hack.linear.x = 0.2;
+				cmd_vel_hack.linear.x = 1.0;
 				cmd_vel_hack.angular.z = 0.0;
 				twist_pub.publish(cmd_vel_hack);
 				if(m_isNewID){
@@ -329,7 +484,7 @@ private:
 					m_near_tgt_state = 2;
 				}
 			}else if(m_near_tgt_state == 2){
-				cmd_vel_hack.linear.x = -0.2;
+				cmd_vel_hack.linear.x = -1.0;
 				cmd_vel_hack.angular.z = 0.0;
 				twist_pub.publish(cmd_vel_hack);
 				if(diff_time > near_back_time){
@@ -351,7 +506,18 @@ private:
 				m_action = RULO_PLAN_STATE_MOVE_KNOWNGOAL;
 				//goal_id更新
 				global_goal_id = (global_goal_id == ((sizeof(goal_ptn)/sizeof(Point))-1) ? 0 : global_goal_id+1); 
-				//次のゴール設定時にNewID検出フラグはリセット
+
+				// SKIPゴール判定 (ID=2or5or8 で直近10秒以内で敵を検出していた場合は１つskip）
+				ROS_INFO("Enemy detect: %f", (ros::Time::now().toSec() - m_enemy_det_time));
+				if(global_goal_id==2 || global_goal_id==5 || global_goal_id==9){
+					if((ros::Time::now().toSec() - m_enemy_det_time) < 10){
+					 global_goal_id++;
+					 ROS_INFO("Enemy Near : Caution!! Goal Skip");
+					}	
+				}else if(global_goal_id==6){
+					global_goal_id++;
+				}
+				//次のゴール設定時にNewID検出フラグはリット
 				m_isNewID = false;
 			}
 			break;
@@ -438,33 +604,26 @@ private:
 				//wait_timeが0以上の場合は、_MOVE_NEARTARGETに移行
 				if(goal_ptn[global_goal_id].wait_time > 0){
 					m_action = RULO_PLAN_STATE_MOVE_NEARTARGET;
-					
-/*					cmd_vel_hack.linear.x = 0.2;
-					cmd_vel_hack.angular.z = 0.0;
-					twist_pub.publish(cmd_vel_hack);
-					ros::Duration(goal_ptn[global_goal_id].front_time).sleep();
-
-					cmd_vel_hack.linear.x = 0.0;
-					cmd_vel_hack.angular.z = 0.0;
-					twist_pub.publish(cmd_vel_hack);
-					ros::Duration(goal_ptn[global_goal_id].wait_time).sleep();
-
-					cmd_vel_hack.linear.x = -0.2;
-					cmd_vel_hack.angular.z = 0.0;
-					twist_pub.publish(cmd_vel_hack);
-					ros::Duration(goal_ptn[global_goal_id].front_time).sleep();
-
-
-					cmd_vel_hack.linear.x = 0.0;
-					cmd_vel_hack.angular.z = 0.0;
-					twist_pub.publish(cmd_vel_hack);
-*/
 				}else{
 					m_action = RULO_PLAN_STATE_MOVE_KNOWNGOAL;
 					//goal_id更新
 					global_goal_id = (global_goal_id == ((sizeof(goal_ptn)/sizeof(Point))-1) ? 0 : global_goal_id+1); 
+
+					// SKIPゴール判定 (ID=2or5or8 で直近10秒以内で敵を検出していた場合は１つskip）
+					ROS_INFO("Enemy detect: %f", (ros::Time::now().toSec() - m_enemy_det_time));
+					if(global_goal_id==2 || global_goal_id==5 || global_goal_id==9){
+						if((ros::Time::now().toSec() - m_enemy_det_time) < 10){
+						 global_goal_id++;
+						 ROS_INFO("Enemy Near : Caution!! Goal Skip");
+						}	
+					}else if(global_goal_id==6){
+						global_goal_id++;
+					}
+
 					//次のゴール設定時にNewID検出フラグはリセット
 					m_isNewID = false;
+
+
 				}
 			}
 			// Docking検出モードの場合、AUTO_DOCKING_STATEへ遷移
@@ -484,8 +643,11 @@ private:
 		***************/
         else if(goal_state == actionlib::SimpleClientGoalState::ABORTED){
         	ROS_INFO("MOVE_KNONWGOAL not_setGoal : (%s)", goal_state.toString().c_str());
-
-			cmd_vel_hack.linear.x = -0.1;
+			if(m_back_run == true){
+				cmd_vel_hack.linear.x = 0.3;
+			}else{
+				cmd_vel_hack.linear.x = -0.3;
+			}
 			cmd_vel_hack.angular.z = 0.0;
 			twist_pub.publish(cmd_vel_hack);
 			ros::Duration(1).sleep();
@@ -543,11 +705,23 @@ private:
 			// MOVE_KNOWNGOALの場合、次のゴール指示
 			if(m_state == RULO_PLAN_STATE_MOVE_KNOWNGOAL){
 				global_goal_id = (global_goal_id == ((sizeof(goal_ptn)/sizeof(Point))-1) ? 0 : global_goal_id+1);
+
+				// SKIPゴール判定 (ID=2or5or8 で直近10秒以内で敵を検出していた場合は１つskip）
+				ROS_INFO("Enemy detect: %f", (ros::Time::now().toSec() - m_enemy_det_time));
+				if(global_goal_id==2 || global_goal_id==5 || global_goal_id==9){
+					if((ros::Time::now().toSec() - m_enemy_det_time) < 10){
+					 global_goal_id++;
+					 ROS_INFO("Enemy Near : Caution!! Goal Skip");
+					}	
+				}else if(global_goal_id==6){
+					global_goal_id++;
+				}
 				ioState = 2;
 			}
-			// MOVE_NEARTARGETの場合
-			if(m_state == RULO_PLAN_STATE_MOVE_NEARTARGET){
-
+			// MOVE_NEARENEMYの場合
+			if(m_state == RULO_PLAN_STATE_MOVE_NEARENEMY){
+				m_action = RULO_PLAN_STATE_MOVE_KNOWNGOAL;
+				ioState = 2;
 			}
 
 			//m_knownID更新
@@ -555,6 +729,51 @@ private:
 			m_knownID_num++;
 		}
 		return;
+	}
+
+	/***************************************************************************
+	* camera画像処理関数
+	***************************************************************************/
+	void imageCb(const sensor_msgs::ImageConstPtr& msg) {
+		const int IMG_CENTER = 200;
+		const int range = 10;
+		cv_bridge::CvImagePtr cv_ptr;
+		try {
+			cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
+		} catch (cv_bridge::Exception& e) {
+			ROS_ERROR("cv_bridge exception: %s", e.what());
+			return;
+		}
+
+		cv::cvtColor(cv_ptr->image, hsv, CV_BGR2HSV);	//色空間変換
+		cv::inRange(hsv, cv::Scalar(60 - range, 100, 100), cv::Scalar(60 + range, 255, 255), mask); // 緑色検出でマスク画像の作成
+
+		cv::Moments mu = cv::moments(mask, false);
+		cv::Point2f mc = cv::Point2f(mu.m10 / mu.m00, mu.m01 / mu.m00);
+
+		double area = mu.m00;
+		int x = mu.m10 / mu.m00;
+		int y = mu.m01 / mu.m00;
+		//ROS_INFO("AREA = %f", area);
+
+		if ( area > 1000 ) {
+			m_diffPos = -(x - IMG_CENTER);
+			ROS_INFO("敵発見！！ [%f, %f]", area, m_diffPos);
+			m_enemy_det_time = ros::Time::now().toSec();
+			// 近くなって追いかけれる距離になれば KNOWNENEMYに移動
+			if(m_state == RULO_PLAN_STATE_MOVE_KNOWNGOAL & area > 40000 ){
+				m_action = RULO_PLAN_STATE_MOVE_NEARENEMY;
+				ioState = 2;
+			}
+		}else{
+			if(m_state == RULO_PLAN_STATE_MOVE_NEARENEMY & (ros::Time::now().toSec() - m_enemy_det_time) > 5){
+				m_action = RULO_PLAN_STATE_MOVE_KNOWNGOAL;
+				ioState = 2;
+			}
+		}
+	    // Update GUI Window
+	    cv::imshow("Image window", mask);
+		cv::waitKey(3);
 	}
 
 	/***************************************************************************
@@ -690,14 +909,16 @@ public:
 	*/
 	OnigiriPlanner():
 		nh_(),
-		private_nh_("~"),
+		it_(nh_),
 		m_moveBaseClient("move_base",true)
 	{
 
 		actmove_timer   = nh_.createWallTimer(ros::WallDuration(0.1), boost::bind(&OnigiriPlanner::ActState, this));
 		initialpose_pub = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>("initialpose", 10);
 		joy_sub         = nh_.subscribe("joy", 10, &OnigiriPlanner::JoyConCallback, this);
-		targetid_sub         = nh_.subscribe("target_id", 10, &OnigiriPlanner::TargetIdCallback, this);
+		targetid_sub    = nh_.subscribe("target_id", 10, &OnigiriPlanner::TargetIdCallback, this);
+		image_sub       = it_.subscribe("image_raw", 1, &OnigiriPlanner::imageCb, this);
+
 
     	//state&action initialize
 		m_state =  RULO_PLAN_STATE_STANDBY;
@@ -717,6 +938,8 @@ public:
 		twist.angular.y = 0.0;
 		twist.angular.z = 0.0;
 		twist_pub.publish(twist);
+
+		cv::namedWindow("Image window");
 
 		ROS_INFO("OnigiriPlanner Constructor is finished!");
 	}

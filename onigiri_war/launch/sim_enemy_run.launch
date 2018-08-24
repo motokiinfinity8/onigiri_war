@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<launch>
+
+<!-- blue side robot -->
+  <group ns="blue_bot">
+      <!-- enemy bot run -->
+      <node pkg="onigiri_war" type="enemy.py" name="enemyRun" output="screen"/>
+  </group>
+
+<!-- red side robot 
+  <group ns="red_bot">-->
+      <!-- Your robot control node run -->
+ <!--     <include file="$(find onigiri_war)/launch/your_onigiri.launch" />
+  </group>-->
+
+</launch>
+
