@@ -4,15 +4,16 @@
 <!-- blue side robot -->
   <group ns="blue_bot">
       <!-- enemy bot run -->
-      <node pkg="onigiri_war" type="enemy.py" name="enemyRun" output="screen"/>
+      <node pkg="onigiri_war" type="enemy.py" name="enemyRun" output="screen"/>　<!--敵：使う方をコメントアウト-->
   </group>
+<!--<include file="$(find onigiri_war)/launch/your_onigiri_blue_nongroup.launch" />--> <!--自分：使う方をコメントアウト-->
 
 <!-- red side robot -->
-  <include file="$(find onigiri_navigation)/launch/onigiri_battle.launch" />
- <!-- <group ns="red_bot"> -->
+  <group ns="red_bot">
       <!-- Your robot control node run -->
-      <!--<include file="$(find onigiri_war)/launch/your_onigiri.launch" />-->
-  <!--</group> -->
+      <!--<node pkg="onigiri_war" type="enemy.py" name="enemyRun" output="screen"/>-->　<!--敵：使う方をコメントアウト-->
+  </group>
+<include file="$(find onigiri_war)/launch/your_onigiri_red_nongroup.launch" />　<!--自分：使う方をコメントアウト-->
 
 </launch>
 
