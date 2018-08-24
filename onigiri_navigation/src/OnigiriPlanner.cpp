@@ -63,8 +63,8 @@ Point goal_ptn[] = {
 //{1.518, 0.032, -0.324, 0.0, 0.0, true},	// 手前真ん中の位置
 {3.250,  0.012,  0.000, 0.0, 0.0, false},	// 4:敵陣センター
 {3.250,  0.012, -0.999, 1.0, 2.0, false},	// 5:敵陣センター(敵がいなかった場合)
-{3.250,  0.012,  0.40,  0.0, 0.0, false},	// 6:敵陣センター(敵がいた場合) 
-{2.374, -0.889,  0.982, 0.5, 2.0, false},	// 7:右側の後ろ
+{3.250,  0.012,  0.30,  0.0, 0.0, false},	// 6:敵陣センター(敵がいた場合) 
+{2.374, -0.889,  0.987, 0.5, 2.0, false},	// 7:右側の後ろ
 {2.374, -0.889,  0.712, 0.5, 2.0, false},	// 8:右側の中央向き
 {2.374, -0.889,  0.049, 0.5, 2.0, false},	// 9:右側の正面　(敵がいたらスキップ)
 {2.374, -0.889,  0.712, 0.0, 0.0, false},	// 10:右側の中央向き
@@ -609,7 +609,7 @@ private:
 					//goal_id更新
 					global_goal_id = (global_goal_id == ((sizeof(goal_ptn)/sizeof(Point))-1) ? 0 : global_goal_id+1); 
 
-					// SKIPゴール判定 (ID=2or5or8 で直近10秒以内で敵を検出していた場合は１つskip）
+					// SKIPゴール判定 (ID=2or5or9 で直近10秒以内で敵を検出していた場合は１つskip）
 					ROS_INFO("Enemy detect: %f", (ros::Time::now().toSec() - m_enemy_det_time));
 					if(global_goal_id==2 || global_goal_id==5 || global_goal_id==9){
 						if((ros::Time::now().toSec() - m_enemy_det_time) < 10){
@@ -706,7 +706,7 @@ private:
 			if(m_state == RULO_PLAN_STATE_MOVE_KNOWNGOAL){
 				global_goal_id = (global_goal_id == ((sizeof(goal_ptn)/sizeof(Point))-1) ? 0 : global_goal_id+1);
 
-				// SKIPゴール判定 (ID=2or5or8 で直近10秒以内で敵を検出していた場合は１つskip）
+				// SKIPゴール判定 (ID=2or5or9 で直近10秒以内で敵を検出していた場合は１つskip）
 				ROS_INFO("Enemy detect: %f", (ros::Time::now().toSec() - m_enemy_det_time));
 				if(global_goal_id==2 || global_goal_id==5 || global_goal_id==9){
 					if((ros::Time::now().toSec() - m_enemy_det_time) < 10){
